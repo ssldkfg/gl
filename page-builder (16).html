@@ -91,6 +91,7 @@ canvas{max-width:100%;height:auto;box-shadow:0 2px 8px #0003;background:#fff}
 <main id="out"></main>
 <script>
 const $=i=>document.getElementById(i);
+const yieldUI=(()=>{const ch=new MessageChannel();let res;ch.port1.onmessage=()=>res();return()=>new Promise(r=>{res=r;ch.port2.postMessage(0)})})();
 const PW=1240,PH=1754,CELL=30,ML=4*CELL,MR=PW-CELL,MT=2*CELL,MB=PH-2*CELL;
 let D={},multi=[],miss=new Set(),last={},cfg={};
 const B=(w,a,d,f)=>({w,a,d,draw:f}),j=()=>(Math.random()-.5)*1.4;
@@ -102,12 +103,15 @@ const FN=["det","sin","cos","ln","log","lim","min","max","rank"],SPC=["quad","qq
 function pick(k){const v=D[k];if(!v||!v.length)return null;let i=Math.floor(Math.random()*v.length);if(v.length>1&&i===last[k])i=(i+1)%v.length;last[k]=i;const g=v[i];
  if(!g.m){const y=g.s.flat().map(p=>p[1]);g.m=[Math.min(...y),Math.max(...y)]}return g}
 function paint(c,ss,ox,oy,sx,sy){c.globalAlpha=cfg.al?.8+Math.random()*.2:1;c.lineWidth=cfg.lw;c.lineCap=c.lineJoin="round";c.strokeStyle=c.fillStyle=cfg.ink;
- for(const s of ss){const p=s.map(q=>[ox+q[0]*sx,oy+q[1]*sy]);c.beginPath();
-  if(p.length<2){c.arc(p[0][0],p[0][1],c.lineWidth/2,0,7);c.fill();continue}
-  c.moveTo(...p[0]);for(let i=1;i<p.length-1;i++)c.quadraticCurveTo(...p[i],(p[i][0]+p[i+1][0])/2,(p[i][1]+p[i+1][1])/2);
-  c.lineTo(...p[p.length-1]);c.stroke()}c.globalAlpha=1}
+ for(const s of ss){const n=s.length,f=s[0];c.beginPath();
+  if(n<2){c.arc(ox+f[0]*sx,oy+f[1]*sy,c.lineWidth/2,0,7);c.fill();continue}
+  c.moveTo(ox+f[0]*sx,oy+f[1]*sy);
+  for(let i=1;i<n-1;i++){const a=s[i],b=s[i+1],ax=ox+a[0]*sx,ay=oy+a[1]*sy;c.quadraticCurveTo(ax,ay,(ax+(ox+b[0]*sx))/2,(ay+(oy+b[1]*sy))/2)}
+  const e=s[n-1];c.lineTo(ox+e[0]*sx,oy+e[1]*sy);c.stroke()}c.globalAlpha=1}
 
-function units(s){const u=[];for(let i=0;i<s.length;){const m=multi.find(k=>s.startsWith(k,i));if(m){u.push(m);i+=m.length}else{const ch=String.fromCodePoint(s.codePointAt(i));u.push(ch);i+=ch.length}}return u}
+let multiBy=new Map();
+function units(s){const u=[];for(let i=0;i<s.length;){const cand=multiBy.get(s[i]);let m;if(cand)for(const k of cand)if(s.startsWith(k,i)){m=k;break}
+ if(m){u.push(m);i+=m.length}else{const ch=String.fromCodePoint(s.codePointAt(i));u.push(ch);i+=ch.length}}return u}
 function word(str,S,mj){const P=[];let x=0,pe=null,lo=0,a=80*S,d=0,w=0,pn=false;const jn=cfg.join&&!mj,gp=mj?cfg.msp:cfg.sp;
  for(const u of units(str)){
   if(u===' '){x+=cfg.wsp*S;pe=null;continue}
@@ -206,8 +210,12 @@ function L(n,S){let b;
  return(n.sp||n.sb)?scr(b,n,S):b}
 
 /* ---------- document ---------- */
-function build(){
- if(!Object.keys(D).length){$('st').textContent='Сначала загрузите glyphs.json';return}
+let busy=false;
+async function build(){if(busy)return;busy=true;const bt=['go','dl','pr'].map($);bt.forEach(b=>b.disabled=true);
+ try{await buildRun()}catch(e){console.error(e);$('st').textContent='Ошибка: '+e.message;$('st').style.color='#b3261e'}
+ finally{busy=false;bt.forEach(b=>b.disabled=false)}}
+async function buildRun(){
+ if(!Object.keys(D).length){$('st').textContent='Сначала загрузите glyphs.json';$('st').style.color='';return}
  const S=+$('sc').value;
  cfg={
    ink:$('ink').value,
@@ -226,6 +234,7 @@ function build(){
  };
  cfg.lw=Math.max(1,11*S*+$('th').value);
  miss=new Set();
+ $('st').style.color='';$('st').textContent='Верстаю…';await yieldUI();
 
  let raw=$('src').value;
  if(cfg.bfpar){
@@ -259,7 +268,7 @@ function build(){
   if(ds){nl();disp(ds).forEach(b=>lines.push({it:[[b,0]],a:b.a,d:b.d,w:b.w,c:1}))}else put(mth(m[2]||m[3]))});
  nl();
 
- const out=$('out');out.innerHTML='';let cx,y,L0,lastB=null,lastFormulaD=0;
+ const out=$('out');[...out.children].forEach(c=>{c.width=c.height=0});out.innerHTML='';let cx,y,L0,lastB=null,lastFormulaD=0,tY=performance.now();
  const alt=$('alt').checked,pn=$('pn').checked,ph=$('dst').checked,k0=+$('dsa').value;
  const lsp=cfg.lsp,paper=cfg.paper;
 
@@ -291,6 +300,7 @@ function build(){
  np();
 
  for(const l of lines){
+  if(performance.now()-tY>25){$('st').textContent='Рисую: стр. '+out.children.length;await yieldUI();tY=performance.now()}
   const a=Math.max(l.a,90*S),d=Math.max(l.d,30*S);
 
   let b;
@@ -321,7 +331,8 @@ function build(){
   lastFormulaD=l.c?l.d:0;
  }
 
- if($('dst').checked)[...out.children].forEach(cv=>out.replaceChild(photo(cv,k0),cv));
+ if(ph){const cvs=[...out.children];for(let i=0;i<cvs.length;i++){$('st').textContent='Эффект фото: '+(i+1)+'/'+cvs.length;await yieldUI();
+   const nc=await photo(cvs[i],k0);out.replaceChild(nc,cvs[i]);cvs[i].width=cvs[i].height=0}}
  $('st').textContent=out.children.length+' стр.'+(miss.size?' ⚠ Не хватает символов ('+miss.size+'): '+[...miss].join('  ')+'. Допишите их в рекордере и загрузите glyphs.json заново.':' Все символы найдены.');
  $('st').style.color=miss.size?'#b3261e':'#2f6b3a';
 }
@@ -379,26 +390,41 @@ function grid(c,k,P,paper,lsp){
  for(let i=a+offset;i<=PH+P;i+=stepY)gl(c,-P,i+.5,PW+P,i+.5,k);
 }
 
-function photo(cv,k){const P=cv._P||0,c=cv.getContext('2d'),W2=cv.width,H2=cv.height,W=PW,H=PH,s=c.getImageData(0,0,W2,H2).data;
- const oc=document.createElement('canvas');oc.width=W;oc.height=H;const o2=oc.getContext('2d'),o=o2.createImageData(W,H),d=o.data,R=Math.random;
+function warp(s,W2,H2,P,k,d){const W=PW,H=PH,R=Math.random;
  const th=(R()-.5)*.018*k,px=(R()-.5)*.07*k,py=(R()-.5)*.07*k,cu=(R()-.5)*16*k,cs=Math.cos(th),sn=Math.sin(th);
  const M=[0,1].map(()=>({fx:.0008+R()*.0025,fy:.0008+R()*.0025,p:R()*6.28,q:R()*6.28,a:(1+R()*2.5)*k}));
  const an=R()*6.28,gx=Math.cos(an),gy=Math.sin(an),gs=.13*k,vg=.2*k,wm=[1,.975+R()*.02,.93+R()*.04],nz=4.5*k;
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const nx=x/W-.5,ny=y/H-.5,dv=1+px*nx+py*ny,u=nx/dv,v=ny/dv;
-  let sx=(u*cs-v*sn+.5)*W,sy=(u*sn+v*cs+.5)*H;
-  sy+=cu*(4*nx*nx-.5);sx+=cu*.4*ny;
-  for(const m of M){sx+=m.a*Math.sin(y*m.fy+m.p);sy+=m.a*Math.cos(x*m.fx+m.q)}
-  sx=Math.min(W2-1.001,Math.max(0,sx+P));sy=Math.min(H2-1.001,Math.max(0,sy+P));
-  const x0=sx|0,y0=sy|0,dx=sx-x0,dy=sy-y0,i=(y0*W2+x0)*4,j=i+W2*4,q=(y*W+x)*4;
-  const f=(1-gs*(nx*gx+ny*gy+.7)/1.4)*(1-vg*(nx*nx+ny*ny)*2),n=(R()+R()+R()-1.5)*nz*2;
-  for(let h=0;h<3;h++){const t=(s[i+h]*(1-dx)+s[i+4+h]*dx)*(1-dy)+(s[j+h]*(1-dx)+s[j+4+h]*dx)*dy;
-   d[q+h]=Math.min(255,Math.max(0,t*f*wm[h]+n))}
-  d[q+3]=255}
+ /* всё, что зависит только от x или только от y, считаем один раз */
+ const NX=new Float64Array(W),NN=new Float64Array(W),GX=new Float64Array(W),SY=new Float64Array(W);
+ for(let x=0;x<W;x++){const nx=x/W-.5;NX[x]=nx;NN[x]=nx*nx;GX[x]=nx*gx;let a=cu*(4*nx*nx-.5);for(const m of M)a+=m.a*Math.cos(x*m.fx+m.q);SY[x]=a}
+ const NY=new Float64Array(H),NNY=new Float64Array(H),GY=new Float64Array(H),SX=new Float64Array(H);
+ for(let y=0;y<H;y++){const ny=y/H-.5;NY[y]=ny;NNY[y]=ny*ny;GY[y]=ny*gy;let a=cu*.4*ny;for(const m of M)a+=m.a*Math.sin(y*m.fy+m.p);SX[y]=a}
+ /* шум: таблица вместо 3×Math.random на пиксель */
+ const NT=new Float32Array(65536),nk=nz*2;for(let i=0;i<65536;i++)NT[i]=(R()+R()+R()-1.5)*nk;
+ let rs=(R()*4294967295)|0||1;
+ const w1=wm[1],w2=wm[2],xm=W2-1.001,ym=H2-1.001,RS=W2*4,gk=gs/1.4,vg2=vg*2;
+ return y=>{const ny=NY[y],nyy=NNY[y],gyy=GY[y],sxr=SX[y],dy=1+py*ny,nys=ny*sn,nyc=ny*cs;
+  for(let x=0,q=y*W*4;x<W;x++,q+=4){
+   const nx=NX[x],idv=1/(dy+px*nx);
+   let sx=((nx*cs-nys)*idv+.5)*W+sxr+P,sy=((nx*sn+nyc)*idv+.5)*H+SY[x]+P;
+   if(sx<0)sx=0;else if(sx>xm)sx=xm;if(sy<0)sy=0;else if(sy>ym)sy=ym;
+   const x0=sx|0,y0=sy|0,fx=sx-x0,fy=sy-y0,i=y0*RS+x0*4,j=i+RS;
+   const c11=fx*fy,c10=fx-c11,c01=fy-c11,c00=1-fx-fy+c11;
+   const f=(1-gk*(GX[x]+gyy+.7))*(1-vg2*(NN[x]+nyy));
+   rs^=rs<<13;rs^=rs>>>17;rs^=rs<<5;const n=NT[rs&65535],f1=f*w1,f2=f*w2;
+   d[q]=(s[i]*c00+s[i+4]*c10+s[j]*c01+s[j+4]*c11)*f+n;
+   d[q+1]=(s[i+1]*c00+s[i+5]*c10+s[j+1]*c01+s[j+5]*c11)*f1+n;
+   d[q+2]=(s[i+2]*c00+s[i+6]*c10+s[j+2]*c01+s[j+6]*c11)*f2+n;
+   d[q+3]=255}}}
+
+async function photo(cv,k){const P=cv._P||0,W2=cv.width,H2=cv.height,W=PW,H=PH,s=cv.getContext('2d').getImageData(0,0,W2,H2).data;
+ const oc=document.createElement('canvas');oc.width=W;oc.height=H;const o2=oc.getContext('2d'),o=o2.createImageData(W,H),row=warp(s,W2,H2,P,k,o.data);
+ for(let y=0;y<H;){const t0=performance.now();do{row(y++)}while(y<H&&performance.now()-t0<14);if(y<H)await yieldUI()}
  o2.putImageData(o,0,0);
- if(o2.filter!==undefined){const t=document.createElement('canvas');t.width=W;t.height=H;t.getContext('2d').drawImage(oc,0,0);o2.filter='blur('+(.3+.35*k).toFixed(2)+'px)';o2.drawImage(t,0,0);o2.filter='none'}
+ if(o2.filter!==undefined){const t=document.createElement('canvas');t.width=W;t.height=H;t.getContext('2d').drawImage(oc,0,0);o2.filter='blur('+(.3+.35*k).toFixed(2)+'px)';o2.drawImage(t,0,0);o2.filter='none';t.width=t.height=0}
  return oc}
 function setD(g,src){D=g||{};multi=Object.keys(D).filter(k=>k.length>1&&D[k].length&&!/^(tall|fracbar)/.test(k)).sort((a,b)=>b.length-a.length);
+ multiBy=new Map();for(const k of multi){let l=multiBy.get(k[0]);if(!l)multiBy.set(k[0],l=[]);l.push(k)}
  $('gs').textContent=src+': '+Object.keys(D).filter(k=>D[k].length).length+' символов'}
 
 const PR=[
@@ -413,7 +439,7 @@ const PR=[
   ['th','Толщина',.2,3,.1,.5]
 ],IDS=PR.map(p=>p[0]);
 
-function save(){try{localStorage.setItem('pb_set',JSON.stringify(getS()))}catch(_){}}
+let svT=0;const save=()=>{clearTimeout(svT);svT=setTimeout(()=>{try{localStorage.setItem('pb_set',JSON.stringify(getS()))}catch(_){}},300)};
 PR.forEach(([id,t,mn,mx,st,v])=>{const r=document.createElement('div');r.className='pr';
  r.innerHTML=`<span>${t}</span><input type="range" id="${id}" min="${mn}" max="${mx}" step="${st}" value="${v}"><input type="number" id="${id}_n" min="${mn}" max="${mx}" step="${st}" value="${v}">`;
  $('pm').appendChild(r);const a=$(id),n=$(id+'_n');
@@ -453,5 +479,8 @@ $('lb').onclick=()=>$('f').click();
 $('f').onchange=async e=>{try{setD(JSON.parse(await e.target.files[0].text()).glyphs,'Файл')}catch(_){alert('Не удалось прочитать файл')}};
 try{const s=JSON.parse(localStorage.getItem('hw_data')||'{}');if(Object.keys(s).length)setD(s,'Из браузера')}catch(_){}
 $('go').onclick=build;$('pr').onclick=()=>print();
-$('dl').onclick=()=>{const jpg=$('fmt').value==='jpg';[...$('out').children].forEach((cv,i)=>setTimeout(()=>{const a=document.createElement('a');a.href=jpg?cv.toDataURL('image/jpeg',.93):cv.toDataURL('image/png');a.download=(i+1)+(jpg?'.jpg':'.png');a.click()},i*400))};
+$('dl').onclick=async()=>{const jpg=$('fmt').value==='jpg',cvs=[...$('out').children];
+ for(let i=0;i<cvs.length;i++){const b=await new Promise(r=>cvs[i].toBlob(r,jpg?'image/jpeg':'image/png',.93));if(!b)continue;
+  const u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=(i+1)+(jpg?'.jpg':'.png');a.click();setTimeout(()=>URL.revokeObjectURL(u),15000);
+  await new Promise(r=>setTimeout(r,400))}};
 </script></body></html>
